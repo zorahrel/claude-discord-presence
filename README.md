@@ -1,49 +1,54 @@
 # claude-discord-presence
 
-Mostra sul **tuo profilo Discord** quante sessioni Claude Code stai spinnando sul Mac.
-Rich Presence via socket IPC (`discord-ipc-0`), zero dipendenze npm.
+Mostra sul **tuo profilo Discord** quante sessioni Claude Code stai spinnando sul Mac,
+e quante stanno *davvero* lavorando in quel momento. Rich Presence via socket IPC
+(`discord-ipc-0`), **zero dipendenze npm**. Opzionale: indicatore in menubar (SwiftBar).
 
-Esempio: header **Jarvis** · `11 sessioni attive` · `Claude Code` · timer.
+Esempio nel card "Playing": `5 al lavoro · 10 aperte` · `🟢 Claude Code in esecuzione` · timer.
 
-## Come funziona
-- `count-sessions.sh` — conta i processi `claude` interattivi (esclude daemon/bg).
-- `presence.mjs` — daemon: si connette all'app Discord desktop e ogni 15s aggiorna
-  la presence solo se il numero è cambiato. Se le sessioni vanno a 0, pulisce la presence.
-- `config.json` — `clientId` = Application ID Discord (ora: app "Jarvis", `1467514747988611174`).
+## Componenti
+- `count-sessions.sh` — stampa `<aperte> <al_lavoro>`.
+- `presence.mjs` — daemon: si connette all'app Discord desktop via IPC e ogni 15s
+  aggiorna la presence (solo se cambia). A 0 sessioni pulisce la presence.
+- `config.json` — `clientId` (Application ID Discord), `largeImage` (URL/asset icona).
+- `claude-sessions.5s.sh` — plugin SwiftBar per la menubar.
+- `install.sh` — installa il servizio launchd + il plugin SwiftBar puntando a questa cartella.
+
+## Aperte vs Al lavoro
+- **Aperte** = processi `claude` interattivi (esclude daemon / bg helpers).
+- **Al lavoro** = sessioni che stanno realmente consumando CPU *adesso* (generano
+  output / eseguono tool), misurato come **delta di CPU-time** del processo su una
+  finestra di campionamento (~1.2s).
+  Niente mtime della transcript: Claude Code la scrive a fine turno, quindi una
+  sessione che sta generando ORA risulterebbe idle. Il `%cpu` di `ps` da solo è la
+  media a vita: serve il *delta*. Soglia regolabile via `WORKING_THRESHOLD_PCT` (default 3%).
 
 ## Requisiti
-- **Discord desktop aperto** sul Mac (non funziona da web/mobile).
+- **Discord desktop aperto** sul Mac (il Rich Presence non esiste da web/mobile).
 - Node (`/opt/homebrew/bin/node`).
+- Un'**Application ID** Discord in `config.json` (qualsiasi app del Developer Portal;
+  l'header del card mostra il nome di quell'app).
+
+## Installazione
+```bash
+./install.sh
+```
+Genera `~/Library/LaunchAgents/com.jarvis.discord-presence.plist` e il plugin SwiftBar
+puntando a questa cartella, avvia il daemon e (se presente) SwiftBar.
 
 ## Gestione (launchd)
 ```bash
-# stato
-launchctl list | grep discord-presence
-# restart
-launchctl kickstart -k gui/$(id -u)/com.jarvis.discord-presence
-# stop / disattiva
-launchctl bootout gui/$(id -u)/com.jarvis.discord-presence
-# riattiva
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jarvis.discord-presence.plist
-# log
-tail -f ~/.openclaw/workspace/claude-discord-presence/presence.log
+launchctl list | grep discord-presence                              # stato
+launchctl kickstart -k gui/$(id -u)/com.jarvis.discord-presence     # restart
+launchctl bootout   gui/$(id -u)/com.jarvis.discord-presence        # stop
+tail -f presence.log                                                # log
 ```
 
-## Aperte vs Al lavoro
-`count-sessions.sh` stampa due numeri: `<aperte> <al_lavoro>`.
-- **Aperte** = processi `claude` interattivi.
-- **Al lavoro** = sessioni la cui transcript `.jsonl` è stata scritta negli ultimi
-  `WORKING_WINDOW` secondi (default 15) → stanno generando output / girando tool.
-  È il segnale affidabile di "spinning adesso"; il `%cpu` di `ps` è media a vita, inutile.
+## Icona nel card (large_image)
+L'immagine grande del card NON è l'icona dell'app: in Rich Presence arriva solo da
+`large_image`, che può essere:
+- un **art-asset** caricato nel Developer Portal (Rich Presence → Art Assets), oppure
+- un **URL diretto** a un'immagine pubblica (risolto client-side su Discord recenti).
 
-La presence mostra `N al lavoro · M aperte` + stato 🟢 quando qualcosa gira.
-
-## Tray (SwiftBar)
-Plugin: `~/Library/Application Support/SwiftBar/Plugins/claude-sessions.5s.sh`
-Menubar: `✻ <aperte> ·<al_lavoro> ▶` (verde se qualcosa gira). Dropdown con elenco
-sessioni + azioni (restart presence, apri log/cartella). Refresh ogni 5s.
-
-## Icona
-Icona app impostata via API (`PATCH /applications/@me`, sunburst Claude su scuro,
-`icon.png`/`icon.svg`). Discord usa quella dell'app. Per un'immagine grande dedicata
-nella presence serve caricare un art-asset nel Developer Portal (opzionale).
+Qui si usa la seconda via: `config.json.largeImage` punta a `icon.png` servito via raw
+GitHub (URL permanente). `external-assets` API è vietata ai bot, quindi serve un URL pubblico.
