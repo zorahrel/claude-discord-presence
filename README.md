@@ -6,6 +6,12 @@ e quante stanno *davvero* lavorando in quel momento. Rich Presence via socket IP
 
 Esempio nel card "Playing": `5 al lavoro · 10 aperte` · `🟢 Claude Code in esecuzione` · timer.
 
+> **Stato: dormiente.** Il LaunchAgent su questa macchina è disattivato dal
+> giugno 2026 (`.plist.disabled`), quindi la presence non viene pubblicata.
+> Il codice funziona ed è aggiornato — il conteggio è stato corretto ad agosto
+> per vedere anche le sessioni headless — ma nessuno lo sta eseguendo. Per
+> riaccenderlo: `./install.sh`.
+
 ## Componenti
 - `count-sessions.sh` — stampa `<aperte> <al_lavoro>`.
 - `presence.mjs` — daemon: si connette all'app Discord desktop via IPC e ogni 15s
