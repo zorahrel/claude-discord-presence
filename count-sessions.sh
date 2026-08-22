@@ -1,10 +1,16 @@
 #!/bin/bash
 # Conta le sessioni Claude Code.
 # Stampa due interi separati da spazio:  "<APERTE> <AL_LAVORO>"
-#   APERTE    = processi `claude` interattivi (escl. daemon / bg helpers)
-#   AL_LAVORO = sessioni che stanno realmente consumando CPU adesso (generano
-#               output / eseguono tool), misurato come DELTA di CPU-time del
-#               processo su una finestra di campionamento.
+#   APERTE    = processi `claude` interattivi + sessioni task headless spawnate
+#               da Topics (binario versionato ~/.local/share/claude/versions/x.y.z),
+#               esclusi daemon / bg helpers
+#   AL_LAVORO = max tra:
+#               (a) sessioni che consumano CPU adesso (delta CPU-time su una
+#                   finestra di campionamento), e
+#               (b) task "in_progress" secondo la board di Topics
+#                   (GET /api/all-boards/tasks) — così un task che sta
+#                   aspettando un tool lungo (CPU ~0) conta comunque.
+#               Se Topics è giù, (b) vale 0 → comportamento solo-CPU.
 #
 # Perché CPU-delta e non la mtime della transcript: Claude Code scrive la
 # transcript .jsonl a fine turno, quindi una sessione che sta generando ORA
@@ -13,13 +19,17 @@
 
 INTERVAL="${SAMPLE_INTERVAL:-1.2}"   # secondi di campionamento
 THRESHOLD_PCT="${WORKING_THRESHOLD_PCT:-3}"  # %CPU sopra cui = "al lavoro"
+TOPICS_TASKS_URL="${TOPICS_TASKS_URL:-https://127.0.0.1:3333/api/all-boards/tasks}"
 
 # pid -> cpu_seconds (TIME di ps, formato [dd-]hh:mm:ss[.cc])
 snapshot() {
   ps -axo pid,time,command | awk '
   {
     m = split($3, a, "/"); base = a[m]
-    if (base != "claude") next
+    # match: basename "claude" (CLI/shim/app) OPPURE binario versionato
+    # (~/.local/share/claude/versions/2.1.x) usato dalle sessioni task di
+    # Topics (--print stream-json, --fork-session), che altrimenti sfuggono
+    if (base != "claude" && index($3, "claude/versions/") == 0) next
     if ($4 == "daemon") next
     if (index($0, "--bg-pty-host") || index($0, "--bg-spare")) next
     # somma campi separati da ":" (e "-" per i giorni) -> secondi
@@ -29,6 +39,12 @@ snapshot() {
     print $1, s
   }'
 }
+
+# fetch Topics in parallelo alla finestra di campionamento (self-signed TLS -> -k)
+TOPICS_TMP="$(mktemp -t topics-tasks)"
+trap 'rm -f "$TOPICS_TMP"' EXIT
+curl -sk --max-time 2 "$TOPICS_TASKS_URL" -o "$TOPICS_TMP" 2>/dev/null &
+CURL_PID=$!
 
 A="$(snapshot)"
 sleep "$INTERVAL"
@@ -50,5 +66,10 @@ ALVORO=$(awk -v thr="$THR" '
   END { print c + 0 }
 ' <(echo "$A") <(echo "$B"))
 
+wait "$CURL_PID" 2>/dev/null
+TASKS=$(grep -o '"status":"in_progress"' "$TOPICS_TMP" 2>/dev/null | wc -l | tr -d ' ')
+TASKS=${TASKS:-0}
+
+[ "$TASKS" -gt "$ALVORO" ] && ALVORO="$TASKS"
 [ "$ALVORO" -gt "$APERTE" ] && ALVORO="$APERTE"
 echo "$APERTE $ALVORO"

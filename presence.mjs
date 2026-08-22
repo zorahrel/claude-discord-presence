@@ -89,6 +89,18 @@ let connected = false;
 let recvBuf = Buffer.alloc(0);
 let lastKey = "";
 
+// Single pending reconnect — guarantees exactly one retry per disconnect so a
+// flapping socket (error+close+end all firing) can't stack timers/sockets and
+// blow up into the SIGABRT crash-loop we used to get.
+let reconnectTimer = null;
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, 10000);
+}
+
 function setActivity({ open, working }) {
   if (!connected) return;
   // 0 aperte -> presence "vuota" (clear) cosi non resta appeso se chiudi tutto
@@ -130,7 +142,7 @@ function connect() {
   const p = ipcPath(0);
   if (!fs.existsSync(p)) {
     console.error(`[presence] socket non trovato (${p}). Discord aperto? riprovo tra 10s`);
-    return setTimeout(connect, 10000);
+    return scheduleReconnect();
   }
   sock = net.createConnection(p);
   recvBuf = Buffer.alloc(0);
@@ -163,10 +175,14 @@ function connect() {
   });
 
   const onGone = (why) => {
-    if (connected || sock) console.error(`[presence] disconnesso (${why}), riconnetto tra 10s`);
+    // Idempotent per socket: error+end+close can all fire for one dead socket;
+    // act only the first time, then ensure a single retry is pending.
+    if (!sock) return scheduleReconnect();
+    console.error(`[presence] disconnesso (${why}), riconnetto tra 10s`);
     connected = false;
+    try { sock.removeAllListeners(); sock.destroy(); } catch {}
     sock = null;
-    setTimeout(connect, 10000);
+    scheduleReconnect();
   };
   sock.on("error", (e) => onGone(e.code || e.message));
   sock.on("end", () => onGone("end"));
@@ -178,3 +194,14 @@ setInterval(tick, REFRESH_MS);
 
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
+
+// Safety net: never let a stray error abort the daemon (this was the source of
+// the SIGABRT crash-loop spamming ~/Library/Logs/DiagnosticReports). Log and
+// keep the reconnect loop alive instead of crashing.
+process.on("uncaughtException", (e) => {
+  console.error(`[presence] uncaughtException (ignorato): ${e?.stack || e}`);
+  scheduleReconnect();
+});
+process.on("unhandledRejection", (e) => {
+  console.error(`[presence] unhandledRejection (ignorato): ${e?.stack || e}`);
+});
