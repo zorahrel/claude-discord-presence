@@ -6,11 +6,22 @@ e quante stanno *davvero* lavorando in quel momento. Rich Presence via socket IP
 
 Esempio nel card "Playing": `5 al lavoro · 10 aperte` · `🟢 Claude Code in esecuzione` · timer.
 
-> **Stato: dormiente.** Il LaunchAgent su questa macchina è disattivato dal
-> giugno 2026 (`.plist.disabled`), quindi la presence non viene pubblicata.
-> Il codice funziona ed è aggiornato — il conteggio è stato corretto ad agosto
-> per vedere anche le sessioni headless — ma nessuno lo sta eseguendo. Per
-> riaccenderlo: `./install.sh`.
+> ### Sostituito da Topics
+>
+> Dall'agosto 2026 la presence la pubblica **Topics** direttamente, e questo
+> daemon è spento (`.plist.disabled` dal 2 giugno). Non è stato abbandonato:
+> è stato reso superfluo.
+>
+> Il motivo è nel merito, non nella pigrizia. Questo daemon contava i processi
+> `claude` con `ps` e *indovinava* chi stesse lavorando misurando il delta di
+> CPU. Topics quel dato lo conosce esatto: sa quali turni sono in streaming e
+> quali task ha in mano la board, quindi non deve stimare niente. Un task fermo
+> ad aspettare un tool lungo consuma CPU zero — per questo daemon sembrava
+> inattivo, per Topics è al lavoro, e la seconda risposta è quella giusta.
+>
+> Il codice qui resta valido e funzionante, utile se vuoi la presence **senza**
+> Topics: `./install.sh` lo riaccende. Il conteggio è stato corretto ad agosto
+> per vedere anche le sessioni headless.
 
 ## Componenti
 - `count-sessions.sh` — stampa `<aperte> <al_lavoro>`.
